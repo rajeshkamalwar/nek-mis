@@ -1,0 +1,52 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.ruff_cache/
+
+# ── Secrets / environment ─────────────────────────────────────────────────────
+.env
+backend/.env
+frontend/.env.local
+*.secret
+secrets/
+
+# ── Database dumps / local data ───────────────────────────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+alembic/versions/*.py   # keep template; exclude if auto-generated migrations leak creds
+
+# ── Node / Frontend ───────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── OS / Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ── Build artefacts ───────────────────────────────────────────────────────────
+frontend/tsconfig.tsbuildinfo
+*.zip
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+celerybeat-schedule
+
+# ── Docker volumes ────────────────────────────────────────────────────────────
+pgdata/
+redisdata/

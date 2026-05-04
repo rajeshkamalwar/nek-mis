@@ -1,0 +1,2 @@
+class ZohoAPIException(Exception):
+    pass

@@ -1,0 +1,20 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: zoho_mapping_studio
+    ports:
+      # Host 5433 when another Postgres already uses 5432 on your machine
+      - "5433:5432"
+    volumes:
+      - zoho_mapping_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d zoho_mapping_studio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  zoho_mapping_pgdata:
