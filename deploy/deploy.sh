@@ -27,9 +27,8 @@ apt-get install -y -qq \
   python3 python3-pip python3-venv python3-dev \
   postgresql postgresql-contrib \
   redis-server \
-  nginx \
-  certbot python3-certbot-nginx \
   libpq-dev
+# NOTE: Nginx and Certbot are intentionally omitted — CloudPanel manages them.
 
 # ── 2. Node 20 (for building the frontend) ────────────────────────────────────
 if ! command -v node &>/dev/null || [[ "$(node -v)" != v20* ]]; then
@@ -150,58 +149,34 @@ systemctl daemon-reload
 systemctl enable --now nek-mis-backend
 systemctl enable --now nek-mis-celery
 
-# ── 12. Nginx — HTTP config (before SSL) ─────────────────────────────────────
-info "Writing Nginx config for ${DOMAIN}..."
-cat > /etc/nginx/sites-available/nek-mis <<EOF
-server {
-    listen 80;
-    server_name ${DOMAIN} www.${DOMAIN};
+# ── 12. CloudPanel vHost config ───────────────────────────────────────────────
+# CloudPanel manages Nginx. We write the vHost snippet that CloudPanel will include.
+# After deploy: add nekmis.online as a site in CloudPanel, then paste this vHost.
+VHOST_SNIPPET="/opt/nek-mis/deploy/cloudpanel-vhost.conf"
+info "Writing CloudPanel vHost snippet to ${VHOST_SNIPPET}..."
+mkdir -p "$(dirname "${VHOST_SNIPPET}")"
+cat > "${VHOST_SNIPPET}" <<'EOF'
+# Paste this into CloudPanel → Sites → nekmis.online → Vhost
+# (replace the default contents)
 
-    # Serve the built React frontend
-    root ${APP_DIR}/frontend/dist;
-    index index.html;
+root /opt/nek-mis/frontend/dist;
+index index.html;
 
-    # API  →  FastAPI backend
-    location /api/ {
-        proxy_pass         http://127.0.0.1:${BACKEND_PORT}/api/;
-        proxy_http_version 1.1;
-        proxy_set_header   Host              \$host;
-        proxy_set_header   X-Real-IP         \$remote_addr;
-        proxy_set_header   X-Forwarded-For   \$proxy_add_x_forwarded_for;
-        proxy_read_timeout 120s;
-    }
+location /api/ {
+    proxy_pass         http://127.0.0.1:8021/api/;
+    proxy_http_version 1.1;
+    proxy_set_header   Host              $host;
+    proxy_set_header   X-Real-IP         $remote_addr;
+    proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_read_timeout 120s;
+}
 
-    # SPA fallback (React Router)
-    location / {
-        try_files \$uri \$uri/ /index.html;
-    }
+location / {
+    try_files $uri $uri/ /index.html;
 }
 EOF
 
-rm -f /etc/nginx/sites-enabled/default
-ln -sf /etc/nginx/sites-available/nek-mis /etc/nginx/sites-enabled/nek-mis
-nginx -t && systemctl reload nginx
-
-# ── 13. SSL — Let's Encrypt via Certbot ──────────────────────────────────────
-info "Obtaining SSL certificate for ${DOMAIN}..."
-certbot --nginx \
-  -d "${DOMAIN}" \
-  -d "www.${DOMAIN}" \
-  --non-interactive \
-  --agree-tos \
-  --email "admin@${DOMAIN}" \
-  --redirect || warn "SSL cert failed — run manually: certbot --nginx -d ${DOMAIN} -d www.${DOMAIN}"
-
-# Auto-renewal cron (certbot installs a systemd timer, this is a fallback)
-(crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx") | sort -u | crontab -
-
-# ── 14. Firewall ──────────────────────────────────────────────────────────────
-info "Configuring firewall..."
-if command -v ufw &>/dev/null; then
-  ufw allow OpenSSH
-  ufw allow 'Nginx Full'
-  ufw --force enable
-fi
+info "vHost snippet written to ${VHOST_SNIPPET}"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
@@ -209,13 +184,19 @@ echo -e "${GREEN}============================================================${N
 echo -e "${GREEN}  NEK-MIS deployed successfully!${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo ""
-echo "  App URL  :  https://${DOMAIN}"
-echo "  API docs :  https://${DOMAIN}/api/docs"
-echo ""
 echo "  Backend : systemctl status nek-mis-backend"
 echo "  Celery  : systemctl status nek-mis-celery"
-echo "  Nginx   : systemctl status nginx"
 echo ""
-warn "Next step: edit ${ENV_FILE} with your Zoho credentials, then:"
-warn "  systemctl restart nek-mis-backend nek-mis-celery"
+warn "NEXT STEPS:"
+warn "1. Edit Zoho credentials:"
+warn "     nano ${ENV_FILE}"
+warn "     systemctl restart nek-mis-backend nek-mis-celery"
+warn ""
+warn "2. Add site in CloudPanel:"
+warn "     https://195.35.23.30:8443 → Sites → + Add Site"
+warn "     Domain: nekmis.online  |  Type: Static (or Generic)"
+warn "     Then paste vHost from: /opt/nek-mis/deploy/cloudpanel-vhost.conf"
+warn "     Then enable SSL via CloudPanel → Let's Encrypt"
+warn ""
+warn "   App will be live at: https://nekmis.online"
 echo ""
