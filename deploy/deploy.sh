@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================
 # NEK-MIS  —  Hostinger VPS Deploy Script
-# Ubuntu 24.04 + CloudPanel
+# Ubuntu 24.04 + CloudPanel  |  Domain: nekmis.online
 # Usage:  bash deploy.sh
 # ============================================================
 set -euo pipefail
@@ -11,6 +11,7 @@ GITHUB_REPO="https://github.com/rajeshkamalwar/nek-mis.git"
 BACKEND_PORT=8021
 DB_NAME="zoho_mapping_studio"
 DB_USER="nek_mis"
+DOMAIN="nekmis.online"
 # Change this password before running!
 DB_PASS="${DB_PASS:-ChangeMe_StrongPass_123}"
 
@@ -27,6 +28,7 @@ apt-get install -y -qq \
   postgresql postgresql-contrib \
   redis-server \
   nginx \
+  certbot python3-certbot-nginx \
   libpq-dev
 
 # ── 2. Node 20 (for building the frontend) ────────────────────────────────────
@@ -98,7 +100,7 @@ cd "${APP_DIR}/backend"
 info "Installing frontend dependencies..."
 cd "${APP_DIR}/frontend"
 
-# Point the frontend at the same origin (Nginx will proxy /api)
+# Empty VITE_API_URL → client uses relative /api (Nginx proxies it)
 cat > "${APP_DIR}/frontend/.env.local" <<EOF
 VITE_API_URL=
 EOF
@@ -148,12 +150,12 @@ systemctl daemon-reload
 systemctl enable --now nek-mis-backend
 systemctl enable --now nek-mis-celery
 
-# ── 12. Nginx config ──────────────────────────────────────────────────────────
-info "Writing Nginx config..."
+# ── 12. Nginx — HTTP config (before SSL) ─────────────────────────────────────
+info "Writing Nginx config for ${DOMAIN}..."
 cat > /etc/nginx/sites-available/nek-mis <<EOF
 server {
     listen 80;
-    server_name _;          # catches the bare IP; add your domain here later
+    server_name ${DOMAIN} www.${DOMAIN};
 
     # Serve the built React frontend
     root ${APP_DIR}/frontend/dist;
@@ -176,14 +178,25 @@ server {
 }
 EOF
 
-# Disable default site, enable ours
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/nek-mis /etc/nginx/sites-enabled/nek-mis
-
 nginx -t && systemctl reload nginx
 
-# ── 13. Firewall ──────────────────────────────────────────────────────────────
-info "Opening firewall ports 22, 80, 443..."
+# ── 13. SSL — Let's Encrypt via Certbot ──────────────────────────────────────
+info "Obtaining SSL certificate for ${DOMAIN}..."
+certbot --nginx \
+  -d "${DOMAIN}" \
+  -d "www.${DOMAIN}" \
+  --non-interactive \
+  --agree-tos \
+  --email "admin@${DOMAIN}" \
+  --redirect || warn "SSL cert failed — run manually: certbot --nginx -d ${DOMAIN} -d www.${DOMAIN}"
+
+# Auto-renewal cron (certbot installs a systemd timer, this is a fallback)
+(crontab -l 2>/dev/null; echo "0 3 * * * certbot renew --quiet && systemctl reload nginx") | sort -u | crontab -
+
+# ── 14. Firewall ──────────────────────────────────────────────────────────────
+info "Configuring firewall..."
 if command -v ufw &>/dev/null; then
   ufw allow OpenSSH
   ufw allow 'Nginx Full'
@@ -196,11 +209,12 @@ echo -e "${GREEN}============================================================${N
 echo -e "${GREEN}  NEK-MIS deployed successfully!${NC}"
 echo -e "${GREEN}============================================================${NC}"
 echo ""
-echo "  App URL  :  http://195.35.23.30"
-echo "  API docs :  http://195.35.23.30/api/docs"
+echo "  App URL  :  https://${DOMAIN}"
+echo "  API docs :  https://${DOMAIN}/api/docs"
 echo ""
-echo "  Backend service : systemctl status nek-mis-backend"
-echo "  Celery  service : systemctl status nek-mis-celery"
+echo "  Backend : systemctl status nek-mis-backend"
+echo "  Celery  : systemctl status nek-mis-celery"
+echo "  Nginx   : systemctl status nginx"
 echo ""
 warn "Next step: edit ${ENV_FILE} with your Zoho credentials, then:"
 warn "  systemctl restart nek-mis-backend nek-mis-celery"
