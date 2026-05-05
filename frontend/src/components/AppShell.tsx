@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useState } from "react";
+import { HelpCircle } from "lucide-react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { useLang, useT } from "../i18n/LangContext";
 
@@ -122,6 +123,17 @@ function TopBar() {
             {navItem("/runs", t("nav.runs"), (p) => p.startsWith("/runs"))}
             <div className="w-px h-5 bg-slate-700 mx-2" />
             {navItem("/settings", t("nav.settings"), (p) => p.startsWith("/settings"))}
+            <Link
+              to="/help"
+              title="How to use"
+              className={`relative flex items-center px-2 py-2 rounded-md transition-colors ${
+                pathname.startsWith("/help")
+                  ? "text-white bg-white/10"
+                  : "text-slate-300 hover:text-white hover:bg-white/8"
+              }`}
+            >
+              <HelpCircle className="w-4 h-4" />
+            </Link>
           </nav>
 
           {/* Language toggle */}

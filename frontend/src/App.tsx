@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { LangProvider } from "./i18n/LangContext";
 
+import { HelpPage } from "./pages/HelpPage";
 import { MappingStudioPage } from "./pages/MappingStudioPage";
 import { RunDetailPage } from "./pages/RunDetailPage";
 import { RunsListPage } from "./pages/RunsListPage";
@@ -28,6 +29,7 @@ export default function App() {
           <Route path="/runs" element={<RunsListPage />} />
           <Route path="/runs/:run_id" element={<RunDetailPage />} />
           <Route path="/mapping-studio/:source_key" element={<MappingStudioPage />} />
+          <Route path="/help" element={<HelpPage />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>
