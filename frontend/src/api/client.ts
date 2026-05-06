@@ -128,11 +128,13 @@ export async function dryRun(runId: string, maxRows = 50): Promise<DryRunRespons
 export type PipelineRunDTO = {
   id: string;
   status: string;
+  zoho_status: string | null;
   source_key: string;
   total_rows: number;
   processed_rows: number;
   profile_id: string | null;
   started_at: string | null;
+  published_at: string | null;
 };
 
 export async function fetchRuns(limit = 20) {
@@ -155,6 +157,7 @@ export type UploadResultDTO = {
   source_key: string;
   total_rows: number;
   profile_id: string | null;
+  duplicate_of: string | null;
 };
 
 export async function uploadCsv(file: File, sourceKey: string) {
@@ -177,6 +180,22 @@ export async function publishRun(runId: string) {
 export async function publishRunAsync(runId: string) {
   const { data } = await api.post<{ queued: boolean; task_id: string; run_id: string }>(`/runs/${runId}/publish-async`);
   return data;
+}
+
+export type ZohoStatusDTO = {
+  run_id: string;
+  zoho_status: string | null;
+  processed_rows: number;
+  published_at: string | null;
+};
+
+export async function fetchRunZohoStatus(runId: string): Promise<ZohoStatusDTO> {
+  const { data } = await api.get<ZohoStatusDTO>(`/runs/${runId}/zoho-status`);
+  return data;
+}
+
+export async function deleteRule(profileId: string, canonicalKey: string): Promise<void> {
+  await api.delete(`/mapping-profiles/${profileId}/rules/${encodeURIComponent(canonicalKey)}`);
 }
 
 export type ZohoSettingsDTO = {

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -36,6 +37,19 @@ def set_processed(db: Session, run_id: uuid.UUID, n: int) -> None:
     if run:
         run.processed_rows = n
         db.commit()
+
+
+def set_zoho_status(db: Session, run_id: uuid.UUID, zoho_status: str, processed: int | None = None) -> None:
+    """Update zoho_status and optionally processed_rows; stamp published_at on success."""
+    run = get_run(db, run_id)
+    if not run:
+        return
+    run.zoho_status = zoho_status
+    if processed is not None:
+        run.processed_rows = processed
+    if zoho_status == "published":
+        run.published_at = datetime.now(timezone.utc)
+    db.commit()
 
 
 def get_source_key_for_run(db: Session, run_id: uuid.UUID) -> str | None:

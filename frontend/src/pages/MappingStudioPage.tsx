@@ -18,20 +18,26 @@ export function MappingStudioPage() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [selectedRule, setSelectedRule] = useState<MappingRuleDTO | null>(null);
 
-  const { data: profiles = [] } = useQuery({
+  const { data: profiles = [], error: profilesErr } = useQuery({
     queryKey: ["mappingProfiles", source_key],
     queryFn: () => fetchProfiles(source_key),
   });
 
-  const { data: accounts = [] } = useQuery({
+  const { data: accounts = [], error: coaErr } = useQuery({
     queryKey: ["coa"],
     queryFn: fetchCoa,
   });
 
-  const { data: keys = [] } = useQuery({
+  const { data: keys = [], error: keysErr } = useQuery({
     queryKey: ["canonicalKeys", source_key],
     queryFn: () => fetchCanonicalKeys(source_key),
   });
+
+  const queryErrors = [
+    profilesErr ? `Profiles: ${String(profilesErr)}` : null,
+    coaErr ? `Chart of Accounts: ${String(coaErr)}` : null,
+    keysErr ? `Canonical keys: ${String(keysErr)}` : null,
+  ].filter(Boolean);
 
   const profile = useMemo(
     () => profiles.find((p) => p.id === selectedProfileId) ?? profiles.find((p) => p.is_default) ?? profiles[0] ?? null,
@@ -55,6 +61,11 @@ export function MappingStudioPage() {
       fullHeight
     >
       <div className="flex flex-col h-full">
+      {queryErrors.length > 0 && (
+        <div className="mx-3 mt-3 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 space-y-1">
+          {queryErrors.map((e) => <p key={e}>{e}</p>)}
+        </div>
+      )}
       <ProfileSelector
         profiles={profiles}
         selectedId={selectedProfileId}

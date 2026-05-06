@@ -82,7 +82,7 @@ function StatusPill({ status }: { status: string }) {
 
 // ─── Run card ─────────────────────────────────────────────────────────────────
 
-type Run = { id: string; source_key: string; status: string; total_rows: number; processed_rows: number; started_at?: string | null; profile_id?: string | null };
+type Run = { id: string; source_key: string; status: string; zoho_status?: string | null; total_rows: number; processed_rows: number; started_at?: string | null; profile_id?: string | null; published_at?: string | null };
 
 function RunCard({ run, onDelete, deleteDisabled, t }: { run: Run; onDelete: () => void; deleteDisabled: boolean; t: (k: string) => string }) {
   const th = theme(run.source_key);
@@ -95,7 +95,19 @@ function RunCard({ run, onDelete, deleteDisabled, t }: { run: Run; onDelete: () 
       <div className="p-4">
         {/* Top row: status + time */}
         <div className="flex items-start justify-between gap-3 mb-3">
-          <StatusPill status={run.status} />
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <StatusPill status={run.status} />
+            {run.zoho_status && (
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold ring-1 ring-inset ${
+                run.zoho_status === "published" ? "bg-teal-100 text-teal-800 ring-teal-300" :
+                run.zoho_status === "failed" ? "bg-red-100 text-red-800 ring-red-300" :
+                run.zoho_status === "partial" ? "bg-orange-100 text-orange-800 ring-orange-300" :
+                "bg-slate-100 text-slate-600 ring-slate-300"
+              }`}>
+                Zoho: {run.zoho_status}
+              </span>
+            )}
+          </div>
           <span className="text-xs text-slate-400 font-mono whitespace-nowrap mt-0.5" title={run.started_at ?? ""}>
             {timeAgo(run.started_at)}
           </span>
@@ -185,6 +197,7 @@ export function RunsListPage() {
   const qc = useQueryClient();
   const [deleteErr, setDeleteErr] = useState("");
   const [activeSource, setActiveSource] = useState<string | null>(null);
+  const [activeZohoStatus, setActiveZohoStatus] = useState<string | null>(null);
   const [collapsedSources, setCollapsedSources] = useState<Set<string>>(() => new Set());
 
   const { data: runs = [], isLoading, error } = useQuery({
@@ -214,9 +227,29 @@ export function RunsListPage() {
     });
   }, [runs]);
 
-  const filteredGroups = activeSource
-    ? grouped.filter(([key]) => key === activeSource)
-    : grouped;
+  const filteredRuns = useMemo(() => {
+    return runs.filter((r) => {
+      if (activeZohoStatus === "published") return r.zoho_status === "published";
+      if (activeZohoStatus === "partial") return r.zoho_status === "partial";
+      if (activeZohoStatus === "failed") return r.zoho_status === "failed";
+      if (activeZohoStatus === "unpublished") return !r.zoho_status;
+      return true;
+    });
+  }, [runs, activeZohoStatus]);
+
+  const filteredGroups = useMemo(() => {
+    const base = activeSource ? filteredRuns.filter((r) => r.source_key === activeSource) : filteredRuns;
+    const map = new Map<string, Run[]>();
+    for (const r of base) {
+      if (!map.has(r.source_key)) map.set(r.source_key, []);
+      map.get(r.source_key)!.push(r);
+    }
+    return Array.from(map.entries()).sort(([, a], [, b]) => {
+      const at = a[0]?.started_at ?? "";
+      const bt = b[0]?.started_at ?? "";
+      return bt.localeCompare(at);
+    });
+  }, [filteredRuns, activeSource]);
 
   function toggleCollapse(key: string) {
     setCollapsedSources((prev) => {
@@ -300,6 +333,25 @@ export function RunsListPage() {
               >
                 <Plus className="w-3.5 h-3.5" /> New upload
               </Link>
+            </div>
+
+            {/* Zoho publish status filter */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs text-slate-500 font-medium">Zoho status:</span>
+              {([null, "published", "partial", "failed", "unpublished"] as const).map((s) => (
+                <button
+                  key={s ?? "all"}
+                  type="button"
+                  onClick={() => setActiveZohoStatus(s)}
+                  className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${
+                    activeZohoStatus === s
+                      ? "bg-slate-800 text-white border-slate-800 shadow-sm"
+                      : "bg-white text-slate-500 border-slate-200 hover:border-slate-500"
+                  }`}
+                >
+                  {s === null ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
+                </button>
+              ))}
             </div>
 
             {/* Groups */}

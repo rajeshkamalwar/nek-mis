@@ -11,6 +11,20 @@ from app.zoho.unified_publisher import dry_run_run, publish_run
 router = APIRouter(prefix="/runs", tags=["runs"])
 
 
+def _run_out(run, source_key: str) -> dict:
+    return {
+        "id": str(run.id),
+        "status": run.status,
+        "zoho_status": run.zoho_status,
+        "source_key": source_key,
+        "total_rows": run.total_rows,
+        "processed_rows": run.processed_rows,
+        "profile_id": str(run.profile_id) if run.profile_id else None,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "published_at": run.published_at.isoformat() if run.published_at else None,
+    }
+
+
 class ApplyProfileBody(BaseModel):
     profile_id: str
 
@@ -23,20 +37,7 @@ class DryRunBody(BaseModel):
 def list_runs(db: Session = Depends(get_db), limit: int = 20):
     lim = max(1, min(limit, 100))
     pairs = run_repo.list_recent_runs_with_source(db, lim)
-    runs = []
-    for run, source_key in pairs:
-        runs.append(
-            {
-                "id": str(run.id),
-                "status": run.status,
-                "source_key": source_key,
-                "total_rows": run.total_rows,
-                "processed_rows": run.processed_rows,
-                "profile_id": str(run.profile_id) if run.profile_id else None,
-                "started_at": run.started_at.isoformat() if run.started_at else None,
-            }
-        )
-    return {"runs": runs}
+    return {"runs": [_run_out(run, sk) for run, sk in pairs]}
 
 
 @router.get("/{run_id}")
@@ -51,15 +52,7 @@ def get_run_detail(run_id: str, db: Session = Depends(get_db)):
     source_key = run_repo.get_source_key_for_run(db, rid)
     if not source_key:
         raise HTTPException(404, "Run source not found")
-    return {
-        "id": str(run.id),
-        "status": run.status,
-        "source_key": source_key,
-        "total_rows": run.total_rows,
-        "processed_rows": run.processed_rows,
-        "profile_id": str(run.profile_id) if run.profile_id else None,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-    }
+    return _run_out(run, source_key)
 
 
 @router.post("/{run_id}/apply-profile")
@@ -117,10 +110,10 @@ def publish_run_ep(run_id: str, db: Session = Depends(get_db)):
     if not source_key:
         raise HTTPException(404, "Run not found")
     try:
-        n = publish_run(db, rid, source_key)
+        result = publish_run(db, rid, source_key)
     except Exception as e:
         raise HTTPException(400, str(e)) from e
-    return {"published": n}
+    return result
 
 
 @router.post("/{run_id}/publish-async")
@@ -139,3 +132,21 @@ def publish_run_async_ep(run_id: str, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(503, f"Could not enqueue task (is Redis running?): {e}") from e
     return {"queued": True, "task_id": task.id, "run_id": run_id}
+
+
+@router.get("/{run_id}/zoho-status")
+def get_zoho_status(run_id: str, db: Session = Depends(get_db)):
+    """Lightweight polling endpoint: returns current zoho_status for a run."""
+    try:
+        rid = uuid.UUID(run_id)
+    except ValueError:
+        raise HTTPException(400, "Invalid run_id")
+    run = run_repo.get_run(db, rid)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    return {
+        "run_id": run_id,
+        "zoho_status": run.zoho_status,
+        "processed_rows": run.processed_rows,
+        "published_at": run.published_at.isoformat() if run.published_at else None,
+    }

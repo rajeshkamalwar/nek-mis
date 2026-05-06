@@ -65,6 +65,21 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/robots.txt", include_in_schema=False)
+def robots_txt():
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("User-agent: *\nDisallow: /api/\n")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap_xml():
+    from fastapi.responses import Response
+    return Response(
+        content='<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>',
+        media_type="application/xml",
+    )
+
+
 # ── Serve the React frontend (production only) ────────────────────────────────
 _DIST = Path(__file__).parent.parent.parent / "frontend" / "dist"
 if _DIST.is_dir():

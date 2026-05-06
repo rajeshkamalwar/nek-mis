@@ -153,6 +153,7 @@ export function UploadPage() {
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [runId, setRunId] = useState<string | null>(null);
   const [totalRows, setTotalRows] = useState<number | null>(null);
+  const [duplicateOf, setDuplicateOf] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const selectedSource = SOURCES.find(s => s.value === sourceKey)!;
@@ -163,10 +164,12 @@ export function UploadPage() {
     setMessage(null);
     setRunId(null);
     setTotalRows(null);
+    setDuplicateOf(null);
     try {
       const data = await uploadCsv(file, sourceKey);
       setRunId(data.run_id);
       setTotalRows(data.total_rows);
+      setDuplicateOf(data.duplicate_of ?? null);
       setMessage({ text: `Successfully imported ${data.total_rows} row(s).`, ok: true });
     } catch (err) {
       setMessage({ text: String(err), ok: false });
@@ -270,6 +273,17 @@ export function UploadPage() {
                 {message.text}
               </p>
             </div>
+
+            {duplicateOf && (
+              <div className="flex items-start gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-amber-600" />
+                <span>
+                  This file looks identical to a previous upload.{" "}
+                  <Link to={`/runs/${duplicateOf}`} className="underline font-semibold">View existing run</Link>
+                  {" "}to avoid duplicates in Zoho.
+                </span>
+              </div>
+            )}
 
             {runId && totalRows != null && message.ok && (
               <div className="grid grid-cols-2 gap-3 pt-1">

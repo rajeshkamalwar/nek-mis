@@ -42,10 +42,26 @@ def _mapped_cell_value(cell: str | None) -> float | str | None:
     return stripped
 
 
+def _csv_file_hash(text: str) -> str:
+    """SHA-256 of the full CSV text used to detect duplicate uploads."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 def ingest_csv_text(db: Session, text: str, source_key: str) -> dict[str, Any]:
     sk = normalize_source_key(source_key)
     if not get_schema_map(sk):
         raise ValueError(f"Unknown or unsupported source_key: {source_key!r}")
+
+    # Duplicate-upload guard: warn if we've seen this exact file before
+    file_hash = _csv_file_hash(text)
+    existing_dup = (
+        db.query(CsvRow)
+        .filter(CsvRow.raw_hash == file_hash)
+        .first()
+    )
+    duplicate_run_id: str | None = None
+    if existing_dup and existing_dup.pipeline_run_id:
+        duplicate_run_id = str(existing_dup.pipeline_run_id)
 
     source = source_repo.get_or_create_source(db, sk)
     csv_file = CsvFile(id=uuid.uuid4(), source_id=source.id)
@@ -105,4 +121,5 @@ def ingest_csv_text(db: Session, text: str, source_key: str) -> dict[str, Any]:
         "source_key": sk,
         "total_rows": rows_inserted,
         "profile_id": str(run.profile_id) if run.profile_id else None,
+        "duplicate_of": duplicate_run_id,
     }

@@ -159,6 +159,7 @@ function CanvasInner({
   };
   const [pendingConn, setPendingConn] = useState<PendingConnection | null>(null);
   const [pickKind, setPickKind] = useState("invoice_line");
+  const [ruleSaving, setRuleSaving] = useState(false);
 
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
     () => buildGraph(keys, accounts, rules, pinnedAccountIds),
@@ -201,18 +202,20 @@ function CanvasInner({
 
   const saveWithKind = useCallback(
     async (kind: string) => {
-      if (!profile || !pendingConn) return;
-      setPendingConn(null);
+      if (!profile || !pendingConn || ruleSaving) return;
+      setRuleSaving(true);
+      const conn = pendingConn;
       try {
         await upsertRule(profile.id, {
-          canonical_key: pendingConn.key,
-          label: pendingConn.key,
-          zoho_account_id: pendingConn.accountId,
-          zoho_account_name: pendingConn.accountName,
+          canonical_key: conn.key,
+          label: conn.key,
+          zoho_account_id: conn.accountId,
+          zoho_account_name: conn.accountName,
           document_kind: kind,
           sign_hint: "auto",
-          sort_order: pendingConn.sortOrder,
+          sort_order: conn.sortOrder,
         });
+        setPendingConn(null);
         setErrMsg("");
         setSaveMsg("Rule saved");
         if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -223,9 +226,11 @@ function CanvasInner({
         setErrMsg(msg);
         if (toastTimer.current) clearTimeout(toastTimer.current);
         toastTimer.current = setTimeout(() => setErrMsg(""), 4000);
+      } finally {
+        setRuleSaving(false);
       }
     },
-    [profile, pendingConn, onGraphRefresh],
+    [profile, pendingConn, ruleSaving, onGraphRefresh],
   );
 
   const onEdgeClick = useCallback(
@@ -401,9 +406,11 @@ function CanvasInner({
               </button>
               <button
                 type="button"
-                className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700"
-                onClick={() => saveWithKind(pickKind)}
+                className="rounded bg-blue-600 px-3 py-1.5 text-xs text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-1"
+                disabled={ruleSaving}
+                onClick={() => void saveWithKind(pickKind)}
               >
+                {ruleSaving && <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />}
                 Save rule
               </button>
             </div>

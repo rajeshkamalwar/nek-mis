@@ -96,6 +96,8 @@ export function SettingsPage() {
     return { label: t("settings.badge.clicktest"), className: "bg-slate-100 text-slate-600" };
   }, [remote, testResult]);
 
+  const [saveErr, setSaveErr] = useState("");
+
   const saveMut = useMutation({
     mutationFn: () =>
       saveZohoSettings({
@@ -111,10 +113,14 @@ export function SettingsPage() {
     onSuccess: async () => {
       clearTestCache();
       setTestResult(null);
+      setSaveErr("");
       setSavedHint(t("settings.saved"));
       window.setTimeout(() => setSavedHint(""), 3000);
       await qc.invalidateQueries({ queryKey: ["zohoSettings"] });
       await qc.invalidateQueries({ queryKey: ["coa"] });
+    },
+    onError: (e: unknown) => {
+      setSaveErr(e instanceof Error ? e.message : "Save failed — check your network connection and try again.");
     },
   });
 
@@ -127,6 +133,8 @@ export function SettingsPage() {
       setTestResult(result);
       const fresh = await qc.fetchQuery({ queryKey: ["zohoSettings"], queryFn: fetchZohoSettings });
       storeCachedTest(cacheFingerprint(fresh), result);
+    } catch (e) {
+      setTestResult({ status: "failed", message: e instanceof Error ? e.message : String(e) });
     } finally {
       setTesting(false);
     }
@@ -277,7 +285,14 @@ export function SettingsPage() {
               type="button"
               className="bg-slate-800 text-white rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-50"
               disabled={saveMut.isPending}
-              onClick={() => saveMut.mutate()}
+              onClick={() => {
+                setSaveErr("");
+                if (!orgId.trim() || !clientId.trim()) {
+                  setSaveErr("Organisation ID and Client ID are required before saving.");
+                  return;
+                }
+                saveMut.mutate();
+              }}
             >
               {saveMut.isPending ? t("settings.btn.saving") : t("settings.btn.save")}
             </button>
@@ -291,6 +306,7 @@ export function SettingsPage() {
             </button>
             {savedHint ? <span className="text-sm text-emerald-700">{savedHint}</span> : null}
           </div>
+          {saveErr ? <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{saveErr}</p> : null}
           <p className="text-xs text-slate-500">{t("settings.test.hint")}</p>
 
           {testResult && (testResult.message || testResult.status === "connected") ? (

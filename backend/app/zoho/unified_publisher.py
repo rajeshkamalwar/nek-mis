@@ -12,6 +12,15 @@ from app.core.exceptions import ZohoAPIException
 from app.core.logging import get_logger
 from app.db.models.mapping import MappingRule
 from app.db.repositories import csv_row_repo, mapping_profile_repo, run_repo, zoho_repo
+
+# publish_run return type carries per-run counters
+from typing import TypedDict
+
+
+class PublishResult(TypedDict):
+    published: int
+    failed: int
+    zoho_status: str  # "published" | "partial" | "failed"
 from app.zoho import client as zoho_client
 from app.zoho.formula_eval import eval_formula
 
@@ -362,16 +371,29 @@ def publish_row(db: Session, row: dict, row_id: str, rules: dict[str, MappingRul
         _post_payment(db, row, row_id, plan["payment"], invoice_id, contact_id)
 
 
-def publish_run(db: Session, run_id: uuid.UUID, source_key: str) -> int:
+def publish_run(db: Session, run_id: uuid.UUID, source_key: str) -> PublishResult:
     rules = load_rules_for_run(db, run_id, source_key)
     rows = csv_row_repo.get_clean_rows(db, run_id)
-    n = 0
+    published = 0
+    failed = 0
     for r in rows:
         data = r.mapped_data or {}
-        publish_row(db, data, str(r.id), rules, source_key)
-        n += 1
-    run_repo.set_processed(db, run_id, n)
-    return n
+        try:
+            publish_row(db, data, str(r.id), rules, source_key)
+            published += 1
+        except Exception as exc:
+            failed += 1
+            logger.error("publish_row failed run=%s row=%s: %s", run_id, r.id, exc)
+
+    if failed == 0:
+        zoho_status = "published"
+    elif published == 0:
+        zoho_status = "failed"
+    else:
+        zoho_status = "partial"
+
+    run_repo.set_zoho_status(db, run_id, zoho_status, processed=published)
+    return PublishResult(published=published, failed=failed, zoho_status=zoho_status)
 
 
 def dry_run_plan_for_row(canonical_row: dict, rules: dict[str, MappingRule]) -> dict[str, Any]:

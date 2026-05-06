@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { CheckCircle2, ChevronDown, ChevronRight, Loader2, XCircle } from "lucide-react";
 
 import {
   applyProfileToRun,
@@ -13,6 +13,7 @@ import {
   type DryRunResponseDTO,
   fetchProfiles,
   fetchRun,
+  fetchRunZohoStatus,
   publishRun,
   publishRunAsync,
 } from "../api/client";
@@ -387,10 +388,24 @@ export function RunDetailPage() {
   const [showRawDry, setShowRawDry] = useState(false);
 
   const [pubOut, setPubOut] = useState("");
+  const [publishing, setPublishing] = useState(false);
   const [profileId, setProfileId] = useState<string>("");
   const [applyMsg, setApplyMsg] = useState<string>("");
+  const [applyLoading, setApplyLoading] = useState(false);
   const [deleteErr, setDeleteErr] = useState("");
   const [deleting, setDeleting] = useState(false);
+  // Async-publish polling
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [pollStatus, setPollStatus] = useState<string | null>(null);
+
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => () => stopPolling(), [stopPolling]);
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ["pipelineRun", run_id],
@@ -442,20 +457,43 @@ export function RunDetailPage() {
   }
 
   async function handlePublish() {
+    setPublishing(true);
+    setPubOut("");
     try {
       const data = await publishRun(run_id);
       setPubOut(JSON.stringify(data, null, 2));
+      await qc.invalidateQueries({ queryKey: ["pipelineRun", run_id] });
     } catch (e) {
       setPubOut(String(e));
+    } finally {
+      setPublishing(false);
     }
   }
 
   async function handlePublishAsync() {
+    setPublishing(true);
+    setPubOut("");
+    setPollStatus("queued");
+    stopPolling();
     try {
       const data = await publishRunAsync(run_id);
       setPubOut(JSON.stringify(data, null, 2));
+      // Start polling every 3 s until zoho_status is no longer null
+      pollRef.current = setInterval(async () => {
+        try {
+          const s = await fetchRunZohoStatus(run_id);
+          if (s.zoho_status) {
+            setPollStatus(s.zoho_status);
+            stopPolling();
+            await qc.invalidateQueries({ queryKey: ["pipelineRun", run_id] });
+          }
+        } catch { /* ignore transient poll errors */ }
+      }, 3000);
     } catch (e) {
       setPubOut(String(e));
+      setPollStatus(null);
+    } finally {
+      setPublishing(false);
     }
   }
 
@@ -477,22 +515,30 @@ export function RunDetailPage() {
   async function handleApplyProfile() {
     const pid = profileId || defaultProfile?.id;
     if (!pid) return;
+    setApplyLoading(true);
+    setApplyMsg("");
     try {
       await applyProfileToRun(run_id, pid);
       setApplyMsg(t("detail.msg.applied"));
       await qc.invalidateQueries({ queryKey: ["pipelineRun", run_id] });
-      // Re-run preview with new profile
       void handleRefreshDryRun();
     } catch (e) {
       setApplyMsg(String(e));
+    } finally {
+      setApplyLoading(false);
     }
   }
 
   const publishSummary = useMemo(() => {
     if (!pubOut.trim()) return null;
     try {
-      const o = JSON.parse(pubOut) as { published?: number };
-      if (typeof o.published === "number") return `${t("detail.section.publish")}: ${o.published} row(s).`;
+      const o = JSON.parse(pubOut) as { published?: number; zoho_status?: string; failed?: number };
+      if (typeof o.published === "number") {
+        const parts = [`Published: ${o.published} row(s)`];
+        if (o.failed) parts.push(`${o.failed} failed`);
+        if (o.zoho_status) parts.push(`status: ${o.zoho_status}`);
+        return parts.join(" · ");
+      }
     } catch { /* ignore */ }
     return null;
   }, [pubOut]);
@@ -514,6 +560,17 @@ export function RunDetailPage() {
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-slate-700">
               <span><span className="text-slate-400">{t("detail.meta.source")}</span> <span className="font-mono font-medium">{run.source_key}</span></span>
               <span><span className="text-slate-400">{t("detail.meta.status")}</span> <span className={`font-medium ${run.status === "completed" ? "text-emerald-700" : "text-slate-700"}`}>{run.status}</span></span>
+              {run.zoho_status && (
+                <span>
+                  <span className="text-slate-400">Zoho </span>
+                  <span className={`font-medium ${
+                    run.zoho_status === "published" ? "text-emerald-700" :
+                    run.zoho_status === "failed" ? "text-red-700" :
+                    run.zoho_status === "partial" ? "text-amber-700" : "text-slate-700"
+                  }`}>{run.zoho_status}</span>
+                  {run.published_at && <span className="text-slate-400 ml-1 text-xs">({new Date(run.published_at).toLocaleString()})</span>}
+                </span>
+              )}
               <span><span className="text-slate-400">{t("detail.meta.rows")}</span> <span className="font-medium">{run.total_rows}</span> {t("detail.meta.total")} · <span className="font-medium">{run.processed_rows}</span> {t("detail.meta.processed")}</span>
               <span><span className="text-slate-400">{t("detail.meta.profile")}</span> <span className="font-mono text-xs">{run.profile_id ?? t("detail.meta.none")}</span></span>
             </div>
@@ -544,7 +601,8 @@ export function RunDetailPage() {
                   </option>
                 ))}
               </select>
-              <button type="button" className="rounded bg-slate-700 text-white px-3 py-1.5 text-sm" onClick={handleApplyProfile}>
+              <button type="button" className="rounded bg-slate-700 text-white px-3 py-1.5 text-sm disabled:opacity-50 flex items-center gap-1.5" disabled={applyLoading} onClick={() => void handleApplyProfile()}>
+                {applyLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 {t("detail.btn.applyprev")}
               </button>
               {applyMsg ? <span className="text-xs text-slate-600">{applyMsg}</span> : null}
@@ -656,15 +714,42 @@ export function RunDetailPage() {
               <p className="text-xs text-amber-700 mt-0.5">{t("detail.publish.warning")}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button type="button" className="rounded bg-amber-700 text-white px-4 py-2 text-sm font-medium hover:bg-amber-800" onClick={handlePublish}>
+              <button
+                type="button"
+                className="rounded bg-amber-700 text-white px-4 py-2 text-sm font-medium hover:bg-amber-800 disabled:opacity-50 flex items-center gap-1.5"
+                disabled={publishing}
+                onClick={() => void handlePublish()}
+              >
+                {publishing && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t("detail.btn.publishsync")}
               </button>
-              <button type="button" className="rounded border border-amber-600 text-amber-800 bg-white px-4 py-2 text-sm font-medium hover:bg-amber-50" onClick={handlePublishAsync}>
+              <button
+                type="button"
+                className="rounded border border-amber-600 text-amber-800 bg-white px-4 py-2 text-sm font-medium hover:bg-amber-50 disabled:opacity-50 flex items-center gap-1.5"
+                disabled={publishing}
+                onClick={() => void handlePublishAsync()}
+              >
+                {publishing && <Loader2 className="w-4 h-4 animate-spin" />}
                 {t("detail.btn.publishasync")}
               </button>
             </div>
+            {pollStatus && !publishSummary ? (
+              <p className={`text-sm flex items-center gap-1.5 font-medium rounded px-3 py-2 ${
+                pollStatus === "queued" ? "bg-blue-50 text-blue-800 border border-blue-200" :
+                pollStatus === "published" ? "bg-emerald-50 text-emerald-800 border border-emerald-200" :
+                pollStatus === "failed" ? "bg-red-50 text-red-800 border border-red-200" :
+                "bg-amber-50 text-amber-800 border border-amber-200"
+              }`}>
+                {pollStatus === "queued" && <Loader2 className="w-4 h-4 animate-spin" />}
+                {pollStatus === "published" && <CheckCircle2 className="w-4 h-4" />}
+                {pollStatus === "failed" && <XCircle className="w-4 h-4" />}
+                {pollStatus === "queued" ? "Queued — waiting for Celery worker…" : `Zoho status: ${pollStatus}`}
+              </p>
+            ) : null}
             {publishSummary ? (
-              <p className="text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">{publishSummary}</p>
+              <p className="text-sm font-semibold text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-2 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4" />{publishSummary}
+              </p>
             ) : null}
             {pubOut && !publishSummary ? (
               <pre className="text-xs bg-slate-900 text-amber-100 p-3 rounded overflow-auto max-h-48">{pubOut}</pre>

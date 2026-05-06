@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
+import { Trash2 } from "lucide-react";
 import type { MappingRuleDTO } from "../../api/client";
-import { updateRulePanel } from "../../api/client";
+import { updateRulePanel, deleteRule } from "../../api/client";
 import { DOCUMENT_KINDS, SIGN_HINTS } from "../../types/mapping";
 
 const CONDITION_OPS = [
@@ -35,6 +36,7 @@ export function RuleEditPanel({
   const [draft, setDraft] = useState<MappingRuleDTO | null>(null);
   const [q, setQ] = useState("");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [condField, setCondField] = useState("");
   const [condOp, setCondOp] = useState<string>("=");
@@ -81,7 +83,32 @@ export function RuleEditPanel({
 
   return (
     <aside className="w-80 shrink-0 border-l border-slate-200 bg-white p-4 overflow-y-auto max-h-[min(72vh,720px)]">
-      <h3 className="text-xs font-bold uppercase text-slate-500 mb-2">Rule</h3>
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-xs font-bold uppercase text-slate-500">Rule</h3>
+        <button
+          type="button"
+          title="Delete this rule"
+          className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 disabled:opacity-40"
+          disabled={deleting || saving}
+          onClick={async () => {
+            if (!profileId || !draft) return;
+            if (!confirm(`Delete rule "${draft.canonical_key}"? This cannot be undone.`)) return;
+            setDeleting(true);
+            setErr(null);
+            try {
+              await deleteRule(profileId, draft.canonical_key);
+              onSaved();
+            } catch (ex: unknown) {
+              setErr(ex instanceof Error ? ex.message : "Delete failed");
+            } finally {
+              setDeleting(false);
+            }
+          }}
+        >
+          <Trash2 className="w-3.5 h-3.5" />
+          {deleting ? "Deleting…" : "Delete"}
+        </button>
+      </div>
       <p className="font-mono text-sm font-semibold text-slate-900">{draft.canonical_key}</p>
 
       <label className="mt-3 block text-[10px] font-semibold uppercase text-slate-500">Label</label>
